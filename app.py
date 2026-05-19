@@ -1,45 +1,51 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import os
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-DB = 'budgetku.db'
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def init_db():
     conn = get_db()
-    conn.executescript('''
+    cur = conn.cursor()
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             type TEXT, category TEXT, amount REAL,
             date TEXT, note TEXT
         );
+    ''')
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS budgets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             category TEXT, amount REAL, month TEXT
         );
+    ''')
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT, type TEXT
         );
     ''')
-    # Default categories
-    cursor = conn.execute("SELECT COUNT(*) FROM categories")
-    if cursor.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) FROM categories")
+    count = cur.fetchone()[0]
+    if count == 0:
         defaults = [
             ('Makan','expense'),('Transport','expense'),('Belanja','expense'),
             ('Hiburan','expense'),('Tagihan','expense'),('Kesehatan','expense'),
             ('Gaji','income'),('Freelance','income'),('Lainnya','expense')
         ]
-        conn.executemany("INSERT INTO categories (name,type) VALUES (?,?)", defaults)
+        cur.executemany("INSERT INTO categories (name,type) VALUES (%s,%s)", defaults)
     conn.commit()
+    cur.close()
     conn.close()
 
 init_db()
@@ -48,10 +54,13 @@ init_db()
 def get_transactions():
     month = request.args.get('month', '')
     conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if month:
-        rows = conn.execute("SELECT * FROM transactions WHERE date LIKE ? ORDER BY date DESC", (month+'%',)).fetchall()
+        cur.execute("SELECT * FROM transactions WHERE date LIKE %s ORDER BY date DESC", (month+'%',))
     else:
-        rows = conn.execute("SELECT * FROM transactions ORDER BY date DESC").fetchall()
+        cur.execute("SELECT * FROM transactions ORDER BY date DESC")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -59,17 +68,21 @@ def get_transactions():
 def add_transaction():
     d = request.json
     conn = get_db()
-    conn.execute("INSERT INTO transactions (type,category,amount,date,note) VALUES (?,?,?,?,?)",
+    cur = conn.cursor()
+    cur.execute("INSERT INTO transactions (type,category,amount,date,note) VALUES (%s,%s,%s,%s,%s)",
         (d['type'], d['category'], d['amount'], d['date'], d.get('note','')))
     conn.commit()
+    cur.close()
     conn.close()
     return jsonify({'status': 'ok'})
 
 @app.route('/transactions/<int:id>', methods=['DELETE'])
 def delete_transaction(id):
     conn = get_db()
-    conn.execute("DELETE FROM transactions WHERE id=?", (id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM transactions WHERE id=%s", (id,))
     conn.commit()
+    cur.close()
     conn.close()
     return jsonify({'status': 'ok'})
 
@@ -77,15 +90,19 @@ def delete_transaction(id):
 def get_summary():
     month = request.args.get('month', '')
     conn = get_db()
-    where = "WHERE date LIKE ?" if month else ""
-    params = (month+'%',) if month else ()
-    rows = conn.execute(f"SELECT * FROM transactions {where}", params).fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if month:
+        cur.execute("SELECT * FROM transactions WHERE date LIKE %s", (month+'%',))
+    else:
+        cur.execute("SELECT * FROM transactions")
+    rows = cur.fetchall()
     total_income = sum(r['amount'] for r in rows if r['type'] == 'income')
     total_expense = sum(r['amount'] for r in rows if r['type'] == 'expense')
     exp_by_cat = {}
     for r in rows:
         if r['type'] == 'expense':
             exp_by_cat[r['category']] = exp_by_cat.get(r['category'], 0) + r['amount']
+    cur.close()
     conn.close()
     return jsonify({
         'total_income': total_income,
@@ -97,7 +114,10 @@ def get_summary():
 @app.route('/categories', methods=['GET'])
 def get_categories():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM categories").fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM categories")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -105,10 +125,13 @@ def get_categories():
 def get_budgets():
     month = request.args.get('month', '')
     conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if month:
-        rows = conn.execute("SELECT * FROM budgets WHERE month=?", (month,)).fetchall()
+        cur.execute("SELECT * FROM budgets WHERE month=%s", (month,))
     else:
-        rows = conn.execute("SELECT * FROM budgets").fetchall()
+        cur.execute("SELECT * FROM budgets")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -116,14 +139,16 @@ def get_budgets():
 def set_budget():
     d = request.json
     conn = get_db()
-    existing = conn.execute("SELECT id FROM budgets WHERE category=? AND month=?",
-        (d['category'], d['month'])).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM budgets WHERE category=%s AND month=%s", (d['category'], d['month']))
+    existing = cur.fetchone()
     if existing:
-        conn.execute("UPDATE budgets SET amount=? WHERE id=?", (d['amount'], existing['id']))
+        cur.execute("UPDATE budgets SET amount=%s WHERE id=%s", (d['amount'], existing['id']))
     else:
-        conn.execute("INSERT INTO budgets (category,amount,month) VALUES (?,?,?)",
+        cur.execute("INSERT INTO budgets (category,amount,month) VALUES (%s,%s,%s)",
             (d['category'], d['amount'], d['month']))
     conn.commit()
+    cur.close()
     conn.close()
     return jsonify({'status': 'ok'})
 
