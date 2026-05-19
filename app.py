@@ -7,7 +7,7 @@ import os
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-DATABASE_URL = 'postgresql://postgres.fabxhpucydlthhmgugum:MaulBudget26@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres'
+DATABASE_URL = os.environ.get('DATABASE_URL')
 def get_db():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
