@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('SUPABASE_URL')
 print(f"DATABASE_URL: {DATABASE_URL}")
 def get_db():
     conn = psycopg2.connect(DATABASE_URL)
