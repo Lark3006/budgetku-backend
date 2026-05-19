@@ -48,7 +48,10 @@ def init_db():
     cur.close()
     conn.close()
 
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"Database init error: {e}")
 
 @app.route('/transactions', methods=['GET'])
 def get_transactions():
@@ -93,64 +96,4 @@ def get_summary():
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if month:
         cur.execute("SELECT * FROM transactions WHERE date LIKE %s", (month+'%',))
-    else:
-        cur.execute("SELECT * FROM transactions")
-    rows = cur.fetchall()
-    total_income = sum(r['amount'] for r in rows if r['type'] == 'income')
-    total_expense = sum(r['amount'] for r in rows if r['type'] == 'expense')
-    exp_by_cat = {}
-    for r in rows:
-        if r['type'] == 'expense':
-            exp_by_cat[r['category']] = exp_by_cat.get(r['category'], 0) + r['amount']
-    cur.close()
-    conn.close()
-    return jsonify({
-        'total_income': total_income,
-        'total_expense': total_expense,
-        'balance': total_income - total_expense,
-        'expense_by_category': [{'category': k, 'total': v} for k, v in exp_by_cat.items()]
-    })
-
-@app.route('/categories', methods=['GET'])
-def get_categories():
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM categories")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-@app.route('/budgets', methods=['GET'])
-def get_budgets():
-    month = request.args.get('month', '')
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    if month:
-        cur.execute("SELECT * FROM budgets WHERE month=%s", (month,))
-    else:
-        cur.execute("SELECT * FROM budgets")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
-
-@app.route('/budgets', methods=['POST'])
-def set_budget():
-    d = request.json
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id FROM budgets WHERE category=%s AND month=%s", (d['category'], d['month']))
-    existing = cur.fetchone()
-    if existing:
-        cur.execute("UPDATE budgets SET amount=%s WHERE id=%s", (d['amount'], existing['id']))
-    else:
-        cur.execute("INSERT INTO budgets (category,amount,month) VALUES (%s,%s,%s)",
-            (d['category'], d['amount'], d['month']))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({'status': 'ok'})
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    el
