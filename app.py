@@ -7,7 +7,7 @@ import os
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = 'postgresql://postgres.fabxhpucydlthhmgugum:[MaulBudget26]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres'
 
 def get_db():
     conn = psycopg2.connect(DATABASE_URL)
@@ -156,4 +156,4 @@ def set_budget():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':  
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True, host='0.0.0.0') 
