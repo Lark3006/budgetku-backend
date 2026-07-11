@@ -4,6 +4,7 @@ from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
 import os
+from datetime import date
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -35,15 +36,26 @@ def init_db():
             name TEXT, type TEXT
         );
     ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS savings_goals (
+            id SERIAL PRIMARY KEY,
+            name TEXT, target_amount REAL, current_amount REAL DEFAULT 0,
+            created_at TEXT
+        );
+    ''')
     cur.execute("SELECT COUNT(*) FROM categories")
     count = cur.fetchone()[0]
     if count == 0:
         defaults = [
             ('Makan','expense'),('Transport','expense'),('Belanja','expense'),
             ('Hiburan','expense'),('Tagihan','expense'),('Kesehatan','expense'),
-            ('Gaji','income'),('Freelance','income'),('Lainnya','expense')
+            ('Gaji','income'),('Freelance','income'),('Tabungan','expense'),('Lainnya','expense')
         ]
         cur.executemany("INSERT INTO categories (name,type) VALUES (%s,%s)", defaults)
+    else:
+        cur.execute("SELECT COUNT(*) FROM categories WHERE name=%s", ('Tabungan',))
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO categories (name,type) VALUES (%s,%s)", ('Tabungan','expense'))
     conn.commit()
     cur.close()
     conn.close()
@@ -155,5 +167,67 @@ def set_budget():
     conn.close()
     return jsonify({'status': 'ok'})
 
+# ===== Tabungan (Savings Goals) =====
+
+@app.route('/savings', methods=['GET'])
+def get_savings():
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM savings_goals ORDER BY id DESC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/savings', methods=['POST'])
+def add_savings_goal():
+    d = request.json
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO savings_goals (name, target_amount, current_amount, created_at) VALUES (%s,%s,%s,%s)",
+        (d['name'], d['target_amount'], 0, date.today().isoformat())
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+@app.route('/savings/<int:id>/deposit', methods=['POST'])
+def deposit_savings(id):
+    d = request.json
+    amount = d['amount']
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM savings_goals WHERE id=%s", (id,))
+    goal = cur.fetchone()
+    if not goal:
+        cur.close()
+        conn.close()
+        return jsonify({'error': 'Goal not found'}), 404
+
+    cur.execute(
+        "UPDATE savings_goals SET current_amount = current_amount + %s WHERE id=%s",
+        (amount, id)
+    )
+    cur.execute(
+        "INSERT INTO transactions (type,category,amount,date,note) VALUES (%s,%s,%s,%s,%s)",
+        ('expense', 'Tabungan', amount, date.today().isoformat(), f"Nabung: {goal['name']}")
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+@app.route('/savings/<int:id>', methods=['DELETE'])
+def delete_savings_goal(id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM savings_goals WHERE id=%s", (id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
 if __name__ == '__main__':  
-    app.run(debug=True, host='0.0.0.0') 
+    app.run(debug=True, host='0.0.0.0')
